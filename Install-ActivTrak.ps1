@@ -1,5 +1,6 @@
 # ActivTrak Installation Script for Rippling MDM
-# This script downloads and installs ActivTrak
+# Version: 2.0 - Production Ready
+# This script downloads and installs ActivTrak from a permanent GitHub-hosted URL
 
 $ErrorActionPreference = "Stop"
 
@@ -17,10 +18,6 @@ if (-not $isAdmin) {
         exit
     } else {
         # If running from Rippling, the script content is passed directly
-        # Save the entire script to a temp file for elevation
-        $scriptContent = @'
-# PASTE THE ENTIRE SCRIPT CONTENT HERE WHEN DEPLOYING VIA RIPPLING
-'@
         $tempScript = "$env:TEMP\ActivTrak_Elevation_$(Get-Date -Format 'yyyyMMddHHmmss').ps1"
 
         # Get current script content
@@ -40,21 +37,11 @@ if (-not $isAdmin) {
 
 Write-Host "Running with Administrator privileges"
 
-# Configuration
-# Permanent download URL hosted on GitHub Releases
-# This URL will not expire and always points to the latest version
+# Configuration - Permanent GitHub-hosted URL
 $downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v1.0.0/ActivTrak.msi"
-
-# To update to a new version:
-# 1. Download the new MSI from ActivTrak
-# 2. Create a new release in the GitHub repository
-# 3. Upload the new MSI to the release
-# 4. Update the version in the URL above
-
-$originalFilename = "ActivTrak.msi"
-$installerPath = "$env:TEMP\$originalFilename"
+$installerPath = "$env:TEMP\ActivTrak.msi"
 $logPath = "$env:TEMP\ActivTrak_Install.log"
-$downloadTimeoutSeconds = 600  # 10 minute timeout for download
+$downloadTimeoutSeconds = 600
 
 # Function to write log
 function Write-Log {
@@ -73,22 +60,21 @@ function Download-FileWithTimeout {
         [int]$TimeoutSeconds = 600
     )
 
+    $webClient = $null
     try {
-        Write-Log "Attempting download with WebClient (with timeout)..."
+        Write-Log "Attempting download with WebClient..."
 
         $webClient = New-Object System.Net.WebClient
         $webClient.Headers.Add("User-Agent", "PowerShell/ActivTrak-Installer")
 
-        # Register async download with timeout
         $uri = New-Object System.Uri($Url)
         $downloadTask = $webClient.DownloadFileTaskAsync($uri, $OutputPath)
 
-        # Wait for download with timeout
         if ($downloadTask.Wait([TimeSpan]::FromSeconds($TimeoutSeconds))) {
             if ($downloadTask.Exception) {
                 throw $downloadTask.Exception.InnerException
             }
-            Write-Log "Download completed successfully with WebClient"
+            Write-Log "Download completed successfully"
             return $true
         } else {
             $webClient.CancelAsync()
@@ -96,23 +82,16 @@ function Download-FileWithTimeout {
         }
     } catch {
         Write-Log "WebClient download failed: $($_.Exception.Message)"
-        Write-Log "Attempting fallback download with Invoke-WebRequest..."
+        Write-Log "Attempting fallback with Invoke-WebRequest..."
 
         try {
-            # Fallback to Invoke-WebRequest with timeout
-            $ProgressPreference = 'SilentlyContinue'  # Faster downloads
+            $ProgressPreference = 'SilentlyContinue'
             Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSeconds
             Write-Log "Download completed successfully with Invoke-WebRequest"
             return $true
         } catch {
-            Write-Log "Invoke-WebRequest download failed: $($_.Exception.Message)"
-
-            # Check if it's an authentication error (expired URL)
-            if ($_.Exception.Message -match "403|Forbidden|SignatureDoesNotMatch|expired") {
-                throw "Download URL has expired or is invalid. Please generate a fresh download URL from ActivTrak and update the script."
-            }
-
-            throw "All download methods failed: $($_.Exception.Message)"
+            Write-Log "All download methods failed: $($_.Exception.Message)"
+            throw
         }
     } finally {
         if ($webClient) {
@@ -122,284 +101,163 @@ function Download-FileWithTimeout {
 }
 
 try {
-    Write-Log "Starting ActivTrak installation process"
-    Write-Log "Script version: 2.0 (Production - GitHub Hosted)"
+    Write-Log "========================================="
+    Write-Log "ActivTrak Installation Script v2.0"
+    Write-Log "========================================="
+    Write-Log "Starting installation process..."
 
     # Download the installer
-    Write-Log "Downloading ActivTrak installer from GitHub..."
-    Write-Log "Download URL: $downloadUrl"
-    Write-Log "Timeout set to: $downloadTimeoutSeconds seconds"
+    Write-Log "Downloading ActivTrak from GitHub..."
+    Write-Log "URL: $downloadUrl"
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     Download-FileWithTimeout -Url $downloadUrl -OutputPath $installerPath -TimeoutSeconds $downloadTimeoutSeconds
 
-    # Verify the file exists
+    # Verify download
     if (-not (Test-Path $installerPath)) {
-        throw "Installer file not found at $installerPath after download"
+        throw "Installer file not found after download"
     }
 
     $fileSize = (Get-Item $installerPath).Length
     $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
-    Write-Log "Installer downloaded successfully: $fileSizeMB MB"
+    Write-Log "Downloaded successfully: $fileSizeMB MB"
 
-    # Validate file size (typical ActivTrak MSI is 5-50 MB)
     if ($fileSize -lt 1MB) {
-        Write-Log "WARNING: Downloaded file is suspiciously small ($fileSizeMB MB)"
-        Write-Log "This might indicate a download error or expired URL"
+        throw "Downloaded file is too small ($fileSizeMB MB), likely corrupt"
     }
 
-    # Get file hash for validation and logging
+    # Get file hash
     try {
         $fileHash = Get-FileHash -Path $installerPath -Algorithm SHA256
-        Write-Log "File SHA256: $($fileHash.Hash)"
+        Write-Log "SHA256: $($fileHash.Hash)"
     } catch {
-        Write-Log "WARNING: Could not calculate file hash: $($_.Exception.Message)"
+        Write-Log "WARNING: Could not calculate hash: $($_.Exception.Message)"
     }
 
-    # Verify it's a valid MSI file
-    Write-Log "Validating MSI file integrity..."
+    # Validate MSI header
+    Write-Log "Validating MSI file..."
     try {
-        # Check file signature (first bytes should be MSI header)
         $fileBytes = [System.IO.File]::ReadAllBytes($installerPath)
         if ($fileBytes.Length -gt 8) {
-            # MSI files start with D0CF11E0A1B11AE1 (OLE Compound Document)
             $header = [System.BitConverter]::ToString($fileBytes[0..7]) -replace '-', ''
             if ($header -eq 'D0CF11E0A1B11AE1') {
-                Write-Log "MSI file header validation: PASSED"
+                Write-Log "MSI validation: PASSED"
             } else {
-                Write-Log "WARNING: File header does not match MSI format. Header: $header"
-                Write-Log "Expected: D0CF11E0A1B11AE1"
-
-                # Check if it's an HTML error page
-                $fileStart = [System.Text.Encoding]::ASCII.GetString($fileBytes[0..[Math]::Min(1000, $fileBytes.Length-1)])
-                if ($fileStart -match '<html|<!DOCTYPE|<\?xml') {
-                    throw "Downloaded file is HTML/XML, not an MSI. The download URL has likely expired or returned an error page."
+                Write-Log "WARNING: File header does not match MSI format"
+                $fileStart = [System.Text.Encoding]::ASCII.GetString($fileBytes[0..[Math]::Min(100, $fileBytes.Length-1)])
+                if ($fileStart -match '<html|<!DOCTYPE') {
+                    throw "Downloaded file is HTML, not an MSI"
                 }
             }
         }
-
-        # Try to open with Windows Installer COM object
-        $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-        $msiDatabase = $windowsInstaller.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $windowsInstaller, @($installerPath, 0))
-
-        # Try to read product name from MSI
-        try {
-            $view = $msiDatabase.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $msiDatabase, ("SELECT Value FROM Property WHERE Property='ProductName'"))
-            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
-            $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-
-            if ($record) {
-                $productName = $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1)
-                Write-Log "MSI Product Name: $productName"
-
-                if ($productName -notmatch "ActivTrak") {
-                    Write-Log "WARNING: MSI product name does not contain 'ActivTrak'. Verify this is the correct installer."
-                }
-            }
-
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($view) | Out-Null
-            if ($record) {
-                [System.Runtime.Interopservices.Marshal]::ReleaseComObject($record) | Out-Null
-            }
-        } catch {
-            Write-Log "Could not read product name from MSI: $($_.Exception.Message)"
-        }
-
-        Write-Log "MSI file validation: PASSED"
-
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($msiDatabase) | Out-Null
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($windowsInstaller) | Out-Null
-        [System.GC]::Collect()
-        [System.GC]::WaitForPendingFinalizers()
-
     } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "ERROR: MSI file validation FAILED: $errorMessage"
-
-        # Provide helpful error messages
-        if ($errorMessage -match "database|corrupt|invalid") {
-            throw "The downloaded MSI file is corrupted or invalid. The download URL may have expired. Please generate a fresh URL from ActivTrak."
-        } else {
-            throw "MSI validation failed: $errorMessage"
-        }
+        Write-Log "WARNING: MSI validation error: $($_.Exception.Message)"
     }
 
-    # Check if ActivTrak is already installed
+    # Check for existing installation
     Write-Log "Checking for existing ActivTrak installation..."
 
-    # Check registry for ActivTrak
     $uninstallKeys = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )
 
-    $activTrakApps = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
-                     Where-Object { $_.DisplayName -like "*ActivTrak*" }
+    $existingApps = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "*ActivTrak*" }
 
-    if ($activTrakApps) {
-        Write-Log "Found existing ActivTrak installation(s). Attempting to remove..."
-        foreach ($app in $activTrakApps) {
-            Write-Log "Uninstalling: $($app.DisplayName) (Version: $($app.DisplayVersion))"
-            if ($app.UninstallString) {
-                $uninstallString = $app.UninstallString
-                if ($uninstallString -match "msiexec") {
-                    $productCode = $uninstallString -replace ".*(\{[A-F0-9-]+\}).*", '$1'
-                    Write-Log "Running: msiexec.exe /x $productCode /qn /norestart"
-
-                    $uninstallProcess = Start-Process "msiexec.exe" -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru -NoNewWindow
-
-                    if ($uninstallProcess.ExitCode -eq 0 -or $uninstallProcess.ExitCode -eq 3010) {
-                        Write-Log "Uninstallation successful"
-                    } else {
-                        Write-Log "WARNING: Uninstallation returned exit code: $($uninstallProcess.ExitCode)"
-                    }
-
-                    Start-Sleep -Seconds 5
-                }
+    if ($existingApps) {
+        Write-Log "Found existing installation, removing..."
+        foreach ($app in $existingApps) {
+            Write-Log "Uninstalling: $($app.DisplayName)"
+            if ($app.UninstallString -match "msiexec") {
+                $productCode = $app.UninstallString -replace ".*(\{[A-F0-9-]+\}).*", '$1'
+                $uninstallProc = Start-Process "msiexec.exe" -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru -NoNewWindow
+                Write-Log "Uninstall exit code: $($uninstallProc.ExitCode)"
+                Start-Sleep -Seconds 5
             }
         }
     } else {
-        Write-Log "No existing ActivTrak installation found"
+        Write-Log "No existing installation found"
     }
 
-    # Stop any ActivTrak services
-    Write-Log "Checking for ActivTrak services..."
+    # Stop services
+    Write-Log "Stopping ActivTrak services..."
     $services = Get-Service | Where-Object { $_.Name -like "*ActivTrak*" -or $_.DisplayName -like "*ActivTrak*" }
-    if ($services) {
-        foreach ($service in $services) {
-            Write-Log "Stopping service: $($service.Name) (Status: $($service.Status))"
-            if ($service.Status -eq 'Running') {
-                Stop-Service -Name $service.Name -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 2
-            }
-        }
-    } else {
-        Write-Log "No ActivTrak services found"
+    foreach ($service in $services) {
+        Write-Log "Stopping service: $($service.Name)"
+        Stop-Service -Name $service.Name -Force -ErrorAction SilentlyContinue
     }
 
-    # Stop any ActivTrak processes
-    Write-Log "Checking for ActivTrak processes..."
+    # Stop processes
+    Write-Log "Stopping ActivTrak processes..."
     $processes = Get-Process | Where-Object { $_.ProcessName -like "*ActivTrak*" }
-    if ($processes) {
-        foreach ($proc in $processes) {
-            Write-Log "Stopping process: $($proc.ProcessName) (PID: $($proc.Id))"
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        }
-        Start-Sleep -Seconds 3
-    } else {
-        Write-Log "No ActivTrak processes found"
+    foreach ($proc in $processes) {
+        Write-Log "Stopping process: $($proc.ProcessName)"
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     }
 
-    # Install ActivTrak
+    Start-Sleep -Seconds 3
+
+    # Install
     Write-Log "Installing ActivTrak..."
     $msiLogPath = "$env:TEMP\ActivTrak_MSI_Install.log"
 
-    # Use Start-Process with proper MSI arguments
-    $installArguments = @(
-        "/i",
-        "`"$installerPath`"",
-        "/qn",
-        "/norestart",
-        "/l*v",
-        "`"$msiLogPath`""
-    )
+    $installArgs = "/i `"$installerPath`" /qn /norestart /l*v `"$msiLogPath`""
+    Write-Log "Running: msiexec.exe $installArgs"
 
-    $installArgumentString = $installArguments -join " "
-    Write-Log "Running: msiexec.exe $installArgumentString"
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
 
-    try {
-        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgumentString -Wait -PassThru -NoNewWindow
-    } catch {
-        Write-Log "Installation process error: $($_.Exception.Message)"
-        throw
-    }
+    Write-Log "Installation exit code: $($process.ExitCode)"
 
-    Write-Log "Installation process completed with exit code: $($process.ExitCode)"
-
-    # Analyze MSI log for errors or warnings
-    if (Test-Path $msiLogPath) {
-        Write-Log "Analyzing MSI installation log..."
-
-        $logContent = Get-Content $msiLogPath -ErrorAction SilentlyContinue
-        if ($logContent) {
-            # Check for common success indicators
-            $successIndicators = $logContent | Select-String -Pattern "Installation success or error status: 0|Installation completed successfully"
-            if ($successIndicators) {
-                Write-Log "MSI log indicates successful installation"
-            }
-
-            # Check for errors
-            $errorLines = $logContent | Select-String -Pattern "Installation success or error status: [^0]|return value 3|ERROR:" -Context 0,2
-            if ($errorLines -and $process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
-                Write-Log "Found potential errors in MSI log:"
-                $errorLines | Select-Object -First 10 | ForEach-Object { Write-Log "  $($_.Line)" }
-            }
-        }
-    }
-
-    # Check exit code and provide detailed feedback
+    # Check result
     if ($process.ExitCode -eq 0) {
-        Write-Log "ActivTrak installed successfully (Exit Code: 0)"
+        Write-Log "Installation successful"
     } elseif ($process.ExitCode -eq 3010) {
-        Write-Log "ActivTrak installed successfully - Reboot required (Exit Code: 3010)"
+        Write-Log "Installation successful (reboot required)"
     } elseif ($process.ExitCode -eq 1603) {
-        Write-Log "ERROR: Installation failed - Fatal error during installation (Exit Code: 1603)"
+        Write-Log "ERROR: Fatal installation error (1603)"
         if (Test-Path $msiLogPath) {
-            Write-Log "Last 50 lines of MSI log:"
-            Get-Content $msiLogPath -Tail 50 | ForEach-Object { Write-Log "  $_" }
+            Write-Log "Last 30 lines of MSI log:"
+            Get-Content $msiLogPath -Tail 30 | ForEach-Object { Write-Log "  $_" }
         }
-        throw "Installation failed with exit code 1603. Check the MSI log at: $msiLogPath"
+        throw "Installation failed with error 1603"
     } elseif ($process.ExitCode -eq 1618) {
-        throw "Installation failed - Another installation is already in progress (Exit Code: 1618)"
+        throw "Another installation is in progress (1618)"
     } elseif ($process.ExitCode -eq 1619) {
-        throw "Installation failed - Installation package could not be opened (Exit Code: 1619)"
-    } elseif ($process.ExitCode -eq 1620) {
-        throw "Installation failed - Installation package could not be opened. Verify the package exists and is accessible (Exit Code: 1620)"
+        throw "Installation package could not be opened (1619)"
     } elseif ($process.ExitCode -eq 1625) {
-        throw "Installation failed - Installation forbidden by system policy (Exit Code: 1625)"
+        throw "Installation forbidden by system policy (1625)"
     } else {
-        Write-Log "WARNING: Installation completed with unexpected exit code: $($process.ExitCode)"
-        if (Test-Path $msiLogPath) {
-            Write-Log "Last 50 lines of MSI log:"
-            Get-Content $msiLogPath -Tail 50 | ForEach-Object { Write-Log "  $_" }
-        }
-        throw "Installation failed with exit code: $($process.ExitCode). Check the MSI log at: $msiLogPath"
+        throw "Installation failed with exit code: $($process.ExitCode)"
     }
 
-    # Verify installation succeeded
+    # Verify installation
     Write-Log "Verifying installation..."
     Start-Sleep -Seconds 5
 
-    $verifyApps = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
-                  Where-Object { $_.DisplayName -like "*ActivTrak*" }
+    $verifyApps = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "*ActivTrak*" }
 
     if ($verifyApps) {
-        Write-Log "Installation verified successfully:"
         foreach ($app in $verifyApps) {
-            Write-Log "  - $($app.DisplayName) version $($app.DisplayVersion)"
+            Write-Log "Installed: $($app.DisplayName) v$($app.DisplayVersion)"
         }
     } else {
-        Write-Log "WARNING: Could not verify ActivTrak installation in registry"
+        Write-Log "WARNING: Could not verify installation"
     }
 
-    # Check if service is running
-    $verifyService = Get-Service | Where-Object { $_.DisplayName -like "*ActivTrak*" } | Select-Object -First 1
-    if ($verifyService) {
-        Write-Log "ActivTrak service found: $($verifyService.Name) (Status: $($verifyService.Status))"
-        if ($verifyService.Status -ne 'Running') {
-            Write-Log "Note: Service is not running yet, this may be normal on first installation"
-        }
+    # Check service
+    $service = Get-Service | Where-Object { $_.DisplayName -like "*ActivTrak*" } | Select-Object -First 1
+    if ($service) {
+        Write-Log "Service: $($service.Name) - Status: $($service.Status)"
     }
 
-    # Clean up installer
-    Write-Log "Cleaning up installer file..."
+    # Cleanup
+    Write-Log "Cleaning up..."
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
     Write-Log "========================================="
-    Write-Log "ActivTrak installation completed successfully"
-    Write-Log "Installation log: $logPath"
-    Write-Log "MSI log: $msiLogPath"
+    Write-Log "Installation completed successfully"
+    Write-Log "Log file: $logPath"
     Write-Log "========================================="
 
     exit 0
@@ -409,18 +267,17 @@ try {
     Write-Log "INSTALLATION FAILED"
     Write-Log "========================================="
     Write-Log "ERROR: $($_.Exception.Message)"
-    Write-Log "Error Details: $($_.Exception.GetType().FullName)"
+    Write-Log "Type: $($_.Exception.GetType().FullName)"
+
     if ($_.ScriptStackTrace) {
-        Write-Log "Stack Trace: $($_.ScriptStackTrace)"
+        Write-Log "Stack: $($_.ScriptStackTrace)"
     }
+
     Write-Log "========================================="
-    Write-Log "Installation log saved to: $logPath"
-    if (Test-Path "$env:TEMP\ActivTrak_MSI_Install.log") {
-        Write-Log "MSI log saved to: $env:TEMP\ActivTrak_MSI_Install.log"
-    }
+    Write-Log "Log saved to: $logPath"
     Write-Log "========================================="
 
-    # Clean up partial installation
+    # Cleanup
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
     exit 1
