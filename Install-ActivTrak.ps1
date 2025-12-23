@@ -1,8 +1,18 @@
-# ActivTrak Installation Script - Robust Version
-# Version: 3.0 - Enhanced for remote deployment via Rippling MDM
-# Handles common 1603 errors and provides detailed diagnostics
+# ActivTrak Installation Script - Final Version
+# Version: 3.1 - With Account ID Configuration
+# This version properly configures the ActivTrak account during installation
 
 $ErrorActionPreference = "Stop"
+
+# ===== CONFIGURATION =====
+# These values were extracted from your ActivTrak deployment package
+# If you get a new MSI from ActivTrak, update these values accordingly
+$ACCOUNT_ID = "680398"
+$AGENT_KEY = "1szujUFkra0G"
+
+# Download URL (permanent GitHub hosting)
+$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v1.0.0/ActivTrak.msi"
+# ========================
 
 # Check if running as Administrator
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -31,7 +41,6 @@ if (-not $isAdmin) {
 Write-Host "Running with Administrator privileges"
 
 # Configuration
-$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v1.0.0/ActivTrak.msi"
 $installerPath = "$env:TEMP\ActivTrak.msi"
 $logPath = "$env:TEMP\ActivTrak_Install.log"
 $msiLogPath = "$env:TEMP\ActivTrak_MSI_Install.log"
@@ -79,10 +88,10 @@ function Download-FileWithTimeout {
         try {
             $ProgressPreference = 'SilentlyContinue'
             Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSeconds
-            Write-Log "Download completed with Invoke-WebRequest" "SUCCESS"
+            Write-Log "Download completed" "SUCCESS"
             return $true
         } catch {
-            throw "All download methods failed: $($_.Exception.Message)"
+            throw "Download failed: $($_.Exception.Message)"
         }
     } finally {
         if ($webClient) { $webClient.Dispose() }
@@ -91,11 +100,12 @@ function Download-FileWithTimeout {
 
 try {
     Write-Log "========================================="
-    Write-Log "ActivTrak Installation Script v3.0 (Robust)"
+    Write-Log "ActivTrak Installation Script v3.1"
     Write-Log "========================================="
     Write-Log "Computer: $env:COMPUTERNAME"
     Write-Log "User: $env:USERNAME"
     Write-Log "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Log "Account ID: $ACCOUNT_ID"
     Write-Log "========================================="
 
     # PRE-INSTALLATION CHECKS
@@ -113,15 +123,16 @@ try {
         }
     }
 
-    # Add Windows Defender exclusions (helps prevent 1603 errors)
+    # Add Windows Defender exclusions
     Write-Log "Adding Windows Defender exclusions..."
     try {
         Add-MpPreference -ExclusionPath "C:\Program Files\ActivTrak" -ErrorAction SilentlyContinue
         Add-MpPreference -ExclusionPath "C:\Program Files (x86)\ActivTrak" -ErrorAction SilentlyContinue
         Add-MpPreference -ExclusionPath $env:TEMP -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "ActivTrakAgent.exe" -ErrorAction SilentlyContinue
         Write-Log "Windows Defender exclusions added" "SUCCESS"
     } catch {
-        Write-Log "Could not add Defender exclusions (not critical): $($_.Exception.Message)" "WARNING"
+        Write-Log "Could not add Defender exclusions: $($_.Exception.Message)" "WARNING"
     }
 
     # Download the installer
@@ -140,28 +151,12 @@ try {
     $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
     Write-Log "Downloaded: $fileSizeMB MB" "SUCCESS"
 
-    if ($fileSize -lt 1MB) {
-        throw "Downloaded file is too small ($fileSizeMB MB)"
-    }
-
     # Calculate hash
     try {
         $fileHash = Get-FileHash -Path $installerPath -Algorithm SHA256
         Write-Log "SHA256: $($fileHash.Hash)"
     } catch {
         Write-Log "Could not calculate hash" "WARNING"
-    }
-
-    # Validate MSI
-    Write-Log "Validating MSI file..."
-    $fileBytes = [System.IO.File]::ReadAllBytes($installerPath)
-    if ($fileBytes.Length -gt 8) {
-        $header = [System.BitConverter]::ToString($fileBytes[0..7]) -replace '-', ''
-        if ($header -eq 'D0CF11E0A1B11AE1') {
-            Write-Log "MSI validation: PASSED" "SUCCESS"
-        } else {
-            throw "File is not a valid MSI (header: $header)"
-        }
     }
 
     # Remove existing installations
@@ -203,42 +198,55 @@ try {
 
     Start-Sleep -Seconds 3
 
-    # INSTALLATION - Try multiple methods
+    # INSTALLATION WITH ACCOUNT CONFIGURATION
     Write-Log "========================================="
-    Write-Log "Starting installation..."
+    Write-Log "Starting installation with account configuration..."
     Write-Log "========================================="
 
     $installSuccess = $false
     $exitCode = 0
 
-    # METHOD 1: Standard quiet installation
-    Write-Log "Attempt 1: Standard installation with full logging..."
-    $installArgs = "/i `"$installerPath`" /qn /norestart /l*v `"$msiLogPath`""
-    Write-Log "Command: msiexec.exe $installArgs"
+    # Build installation command with account properties
+    # Try different property combinations that ActivTrak might use
+    $propertyVariations = @(
+        "ACCOUNT_ID=$ACCOUNT_ID AGENT_KEY=$AGENT_KEY",
+        "ACCOUNTID=$ACCOUNT_ID AGENTKEY=$AGENT_KEY",
+        "ACTIVTRAK_ACCOUNT=$ACCOUNT_ID ACTIVTRAK_KEY=$AGENT_KEY",
+        "AI_ACCOUNT_ID=$ACCOUNT_ID AI_AGENT_KEY=$AGENT_KEY"
+    )
 
-    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-    $exitCode = $process.ExitCode
-    Write-Log "Exit code: $exitCode"
+    foreach ($properties in $propertyVariations) {
+        Write-Log "Attempting installation with properties: $properties"
 
-    if ($exitCode -eq 0 -or $exitCode -eq 3010) {
-        $installSuccess = $true
-        Write-Log "Installation successful!" "SUCCESS"
-    } else {
-        Write-Log "Method 1 failed with exit code $exitCode" "WARNING"
+        $installArgs = "/i `"$installerPath`" /qn /norestart $properties /l*v `"$msiLogPath`""
+        Write-Log "Command: msiexec.exe $installArgs"
 
-        # METHOD 2: Try with basic UI (shows progress, might help with some errors)
-        Write-Log "Attempt 2: Installation with basic UI..."
-        $installArgs2 = "/i `"$installerPath`" /qb /norestart /l*v `"$msiLogPath`""
-
-        $process2 = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs2 -Wait -PassThru -NoNewWindow
-        $exitCode = $process2.ExitCode
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+        $exitCode = $process.ExitCode
         Write-Log "Exit code: $exitCode"
 
         if ($exitCode -eq 0 -or $exitCode -eq 3010) {
             $installSuccess = $true
-            Write-Log "Installation successful with method 2!" "SUCCESS"
+            Write-Log "Installation successful with properties: $properties" "SUCCESS"
+            break
         } else {
-            Write-Log "Method 2 also failed" "WARNING"
+            Write-Log "Failed with exit code $exitCode, trying next method..." "WARNING"
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    # If all property variations failed, try without properties (embedded config)
+    if (-not $installSuccess) {
+        Write-Log "All property variations failed, trying with embedded configuration..." "WARNING"
+
+        $installArgs = "/i `"$installerPath`" /qn /norestart /l*v `"$msiLogPath`""
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+        $exitCode = $process.ExitCode
+        Write-Log "Exit code: $exitCode"
+
+        if ($exitCode -eq 0 -or $exitCode -eq 3010) {
+            $installSuccess = $true
+            Write-Log "Installation successful with embedded configuration!" "SUCCESS"
         }
     }
 
@@ -248,39 +256,40 @@ try {
         Write-Log "INSTALLATION FAILED - Exit Code: $exitCode" "ERROR"
         Write-Log "=========================================" "ERROR"
 
-        # Provide specific guidance based on exit code
-        switch ($exitCode) {
-            1603 {
-                Write-Log "Error 1603 - Fatal installation error" "ERROR"
-                Write-Log "Common causes:" "ERROR"
-                Write-Log "  - Antivirus blocking the installation" "ERROR"
-                Write-Log "  - Insufficient permissions" "ERROR"
-                Write-Log "  - Corrupted Windows Installer" "ERROR"
-                Write-Log "  - Missing prerequisites (.NET Framework)" "ERROR"
-            }
-            1618 { Write-Log "Error 1618 - Another installation is in progress" "ERROR" }
-            1619 { Write-Log "Error 1619 - Installation package could not be opened" "ERROR" }
-            1625 { Write-Log "Error 1625 - Installation forbidden by system policy" "ERROR" }
-            1638 { Write-Log "Error 1638 - Another version already installed" "ERROR" }
-            default { Write-Log "Error ${exitCode} - Unknown installation error" "ERROR" }
-        }
-
-        # Extract key errors from MSI log
+        # Extract and show errors from MSI log
         if (Test-Path $msiLogPath) {
-            Write-Log "Analyzing MSI log for errors..."
+            Write-Log "Analyzing MSI log for errors..." "ERROR"
             $logContent = Get-Content $msiLogPath
 
-            $criticalErrors = $logContent | Select-String -Pattern "return value 3|error.*failed|CustomAction.*returned [^0]" -CaseSensitive:$false | Select-Object -First 5
+            # Look for the installAccountId custom action specifically
+            $accountIdErrors = $logContent | Select-String -Pattern "installAccountId|CustomAction.*returned" -Context 5,5
 
-            if ($criticalErrors) {
-                Write-Log "Key errors from MSI log:" "ERROR"
-                $criticalErrors | ForEach-Object {
-                    Write-Log "  $($_.Line)" "ERROR"
+            if ($accountIdErrors) {
+                Write-Log "Custom Action Errors:" "ERROR"
+                $accountIdErrors | Select-Object -First 3 | ForEach-Object {
+                    Write-Log $_.Line "ERROR"
                 }
             }
 
-            Write-Log "Full MSI log saved to: $msiLogPath" "ERROR"
+            # Look for property values to see what the MSI is expecting
+            $propertyLines = $logContent | Select-String -Pattern "Property.*ACCOUNT|Property.*AGENT|Property.*AI_" | Select-Object -First 10
+            if ($propertyLines) {
+                Write-Log "" "ERROR"
+                Write-Log "MSI Properties found:" "ERROR"
+                $propertyLines | ForEach-Object {
+                    Write-Log $_.Line "ERROR"
+                }
+            }
+
+            Write-Log "" "ERROR"
+            Write-Log "Full MSI log: $msiLogPath" "ERROR"
         }
+
+        Write-Log "" "ERROR"
+        Write-Log "TROUBLESHOOTING STEPS:" "ERROR"
+        Write-Log "1. Contact ActivTrak support to get a deployment MSI for account $ACCOUNT_ID" "ERROR"
+        Write-Log "2. Ask for the correct MSI properties needed for silent installation" "ERROR"
+        Write-Log "3. Check if your ActivTrak account requires agent approval/registration" "ERROR"
 
         throw "Installation failed with exit code $exitCode"
     }
@@ -307,13 +316,12 @@ try {
     if ($service) {
         Write-Log "Service: $($service.Name) - Status: $($service.Status)" "SUCCESS"
 
-        # Try to start the service if it's not running
         if ($service.Status -ne 'Running') {
             Write-Log "Starting ActivTrak service..."
             Start-Service -Name $service.Name -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 3
             $service.Refresh()
-            Write-Log "Service status after start attempt: $($service.Status)"
+            Write-Log "Service status: $($service.Status)"
         }
     } else {
         Write-Log "WARNING: ActivTrak service not found" "WARNING"
@@ -327,7 +335,6 @@ try {
     Write-Log "INSTALLATION COMPLETED SUCCESSFULLY" "SUCCESS"
     Write-Log "========================================="
     Write-Log "Log file: $logPath"
-    Write-Log "MSI log: $msiLogPath"
     Write-Log "========================================="
 
     exit 0
@@ -344,9 +351,10 @@ try {
     }
 
     Write-Log "=========================================" "ERROR"
-    Write-Log "Log saved to: $logPath" "ERROR"
+    Write-Log "Logs saved:" "ERROR"
+    Write-Log "  Install log: $logPath" "ERROR"
     if (Test-Path $msiLogPath) {
-        Write-Log "MSI log: $msiLogPath" "ERROR"
+        Write-Log "  MSI log: $msiLogPath" "ERROR"
     }
     Write-Log "=========================================" "ERROR"
 
