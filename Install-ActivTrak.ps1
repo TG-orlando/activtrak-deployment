@@ -251,18 +251,18 @@ try {
         # Provide specific guidance based on exit code
         switch ($exitCode) {
             1603 {
-                Write-Log "Error 1603: Fatal installation error" "ERROR"
+                Write-Log "Error 1603 - Fatal installation error" "ERROR"
                 Write-Log "Common causes:" "ERROR"
                 Write-Log "  - Antivirus blocking the installation" "ERROR"
                 Write-Log "  - Insufficient permissions" "ERROR"
                 Write-Log "  - Corrupted Windows Installer" "ERROR"
                 Write-Log "  - Missing prerequisites (.NET Framework)" "ERROR"
             }
-            1618 { Write-Log "Error 1618: Another installation is in progress" "ERROR" }
-            1619 { Write-Log "Error 1619: Installation package could not be opened" "ERROR" }
-            1625 { Write-Log "Error 1625: Installation forbidden by system policy" "ERROR" }
-            1638 { Write-Log "Error 1638: Another version already installed" "ERROR" }
-            default { Write-Log "Error $exitCode: Unknown installation error" "ERROR" }
+            1618 { Write-Log "Error 1618 - Another installation is in progress" "ERROR" }
+            1619 { Write-Log "Error 1619 - Installation package could not be opened" "ERROR" }
+            1625 { Write-Log "Error 1625 - Installation forbidden by system policy" "ERROR" }
+            1638 { Write-Log "Error 1638 - Another version already installed" "ERROR" }
+            default { Write-Log "Error ${exitCode} - Unknown installation error" "ERROR" }
         }
 
         # Extract key errors from MSI log
