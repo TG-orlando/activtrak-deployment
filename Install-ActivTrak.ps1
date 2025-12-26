@@ -1,17 +1,25 @@
-# ActivTrak Installation Script - Final Version
-# Version: 3.1 - With Account ID Configuration
-# This version properly configures the ActivTrak account during installation
+# ActivTrak Installation Script - CORRECTED VERSION
+# Based on official ActivTrak documentation
+# Version: 4.0
+#
+# IMPORTANT: This script requires a properly named MSI from ActivTrak portal
+# MSI filename format: ATAcctXXXXXX_{RandomSecurityToken}.msi
+#
+# Download your pre-configured MSI from:
+# https://app.activtrak.com > Settings > Agents > Download Agent
 
 $ErrorActionPreference = "Stop"
 
 # ===== CONFIGURATION =====
-# These values were extracted from your ActivTrak deployment package
-# If you get a new MSI from ActivTrak, update these values accordingly
-$ACCOUNT_ID = "680398"
-$AGENT_KEY = "1szujUFkra0G"
+# CRITICAL: You must download the MSI from ActivTrak portal
+# The MSI filename MUST match this pattern: ATAcct######_{token}.msi
+# DO NOT rename the file or installation will fail!
 
-# Download URL (permanent GitHub hosting)
-$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v1.0.0/ActivTrak.msi"
+# Option 1: Download from GitHub release (recommended)
+$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v2.0.0/ATAcct680398.8.6.6.0._1szujUFkra0G_14519925690.msi"
+
+# Option 2: Use local file if already downloaded
+# $localMsiPath = "C:\Temp\ATAcct680398(8.6.6.0)_1szujUFkra0G_14519925690.msi"
 # ========================
 
 # Check if running as Administrator
@@ -19,29 +27,24 @@ $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Pri
 $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    Write-Host "Script is not running as Administrator. Attempting to elevate..."
+    Write-Host "Script is not running as Administrator. Attempting to elevate..." -ForegroundColor Yellow
     $scriptPath = $MyInvocation.MyCommand.Path
     if ($scriptPath) {
         Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
         exit
     } else {
         $tempScript = "$env:TEMP\ActivTrak_Elevation_$(Get-Date -Format 'yyyyMMddHHmmss').ps1"
-        try {
-            $currentScript = Get-Content $PSCommandPath -Raw -ErrorAction Stop
-            $currentScript | Out-File -FilePath $tempScript -Force -Encoding UTF8
-        } catch {
-            $MyInvocation.MyCommand.ScriptBlock.ToString() | Out-File -FilePath $tempScript -Force -Encoding UTF8
-        }
+        $MyInvocation.MyCommand.ScriptBlock.ToString() | Out-File -FilePath $tempScript -Force -Encoding UTF8
         Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs -Wait
         Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
         exit
     }
 }
 
-Write-Host "Running with Administrator privileges"
+Write-Host "Running with Administrator privileges" -ForegroundColor Green
 
 # Configuration
-$installerPath = "$env:TEMP\ActivTrak.msi"
+$installerPath = "$env:TEMP\ActivTrak_Deploy.msi"
 $logPath = "$env:TEMP\ActivTrak_Install.log"
 $msiLogPath = "$env:TEMP\ActivTrak_MSI_Install.log"
 $downloadTimeoutSeconds = 600
@@ -57,59 +60,24 @@ function Write-Log {
         "ERROR" { Write-Host $Message -ForegroundColor Red }
         "WARNING" { Write-Host $Message -ForegroundColor Yellow }
         "SUCCESS" { Write-Host $Message -ForegroundColor Green }
+        "INFO" { Write-Host $Message -ForegroundColor Cyan }
         default { Write-Host $Message }
     }
 }
 
-# Function to download file
-function Download-FileWithTimeout {
-    param([string]$Url, [string]$OutputPath, [int]$TimeoutSeconds = 600)
-
-    $webClient = $null
-    try {
-        Write-Log "Downloading from GitHub..."
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Headers.Add("User-Agent", "PowerShell/ActivTrak-Installer")
-        $uri = New-Object System.Uri($Url)
-        $downloadTask = $webClient.DownloadFileTaskAsync($uri, $OutputPath)
-
-        if ($downloadTask.Wait([TimeSpan]::FromSeconds($TimeoutSeconds))) {
-            if ($downloadTask.Exception) {
-                throw $downloadTask.Exception.InnerException
-            }
-            Write-Log "Download completed" "SUCCESS"
-            return $true
-        } else {
-            $webClient.CancelAsync()
-            throw "Download timed out"
-        }
-    } catch {
-        Write-Log "WebClient failed, trying Invoke-WebRequest..." "WARNING"
-        try {
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSeconds
-            Write-Log "Download completed" "SUCCESS"
-            return $true
-        } catch {
-            throw "Download failed: $($_.Exception.Message)"
-        }
-    } finally {
-        if ($webClient) { $webClient.Dispose() }
-    }
-}
-
 try {
-    Write-Log "========================================="
-    Write-Log "ActivTrak Installation Script v3.1"
-    Write-Log "========================================="
+    Write-Log "=========================================" "INFO"
+    Write-Log "ActivTrak Installation Script v4.0 (CORRECTED)" "INFO"
+    Write-Log "Based on Official ActivTrak Documentation" "INFO"
+    Write-Log "=========================================" "INFO"
     Write-Log "Computer: $env:COMPUTERNAME"
     Write-Log "User: $env:USERNAME"
     Write-Log "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Log "Account ID: $ACCOUNT_ID"
-    Write-Log "========================================="
+    Write-Log "=========================================" "INFO"
+    Write-Log ""
 
     # PRE-INSTALLATION CHECKS
-    Write-Log "Running pre-installation checks..."
+    Write-Log "Running pre-installation checks..." "INFO"
 
     # Check Windows Installer service
     Write-Log "Checking Windows Installer service..."
@@ -128,28 +96,86 @@ try {
     try {
         Add-MpPreference -ExclusionPath "C:\Program Files\ActivTrak" -ErrorAction SilentlyContinue
         Add-MpPreference -ExclusionPath "C:\Program Files (x86)\ActivTrak" -ErrorAction SilentlyContinue
-        Add-MpPreference -ExclusionPath $env:TEMP -ErrorAction SilentlyContinue
         Add-MpPreference -ExclusionProcess "ActivTrakAgent.exe" -ErrorAction SilentlyContinue
         Write-Log "Windows Defender exclusions added" "SUCCESS"
     } catch {
         Write-Log "Could not add Defender exclusions: $($_.Exception.Message)" "WARNING"
     }
 
-    # Download the installer
-    Write-Log "Downloading ActivTrak installer..."
-    Write-Log "URL: $downloadUrl"
+    Write-Log ""
+    Write-Log "=========================================" "WARNING"
+    Write-Log "IMPORTANT NOTICE" "WARNING"
+    Write-Log "=========================================" "WARNING"
+    Write-Log "ActivTrak requires a pre-configured MSI downloaded from your portal!" "WARNING"
+    Write-Log ""
+    Write-Log "Steps to get the correct MSI:" "INFO"
+    Write-Log "1. Go to: https://app.activtrak.com" "INFO"
+    Write-Log "2. Navigate to: Settings > Agents > Download Agent" "INFO"
+    Write-Log "3. Select: 'MSI for mass deployment'" "INFO"
+    Write-Log "4. Download the MSI (filename will be ATAcct680398_XXXXXX.msi)" "INFO"
+    Write-Log "5. DO NOT rename the file!" "WARNING"
+    Write-Log "6. Upload to GitHub releases or use local path" "INFO"
+    Write-Log "=========================================" "WARNING"
+    Write-Log ""
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Download-FileWithTimeout -Url $downloadUrl -OutputPath $installerPath -TimeoutSeconds $downloadTimeoutSeconds
+    # Check if using local file or download
+    if (Test-Path variable:localMsiPath) {
+        Write-Log "Using local MSI file: $localMsiPath" "INFO"
+        if (-not (Test-Path $localMsiPath)) {
+            throw "Local MSI file not found: $localMsiPath"
+        }
+        $installerPath = $localMsiPath
+    } else {
+        # Download the installer
+        Write-Log "Downloading ActivTrak installer..." "INFO"
+        Write-Log "URL: $downloadUrl"
+
+        if ($downloadUrl -like "*{TOKEN}*") {
+            Write-Log "ERROR: Download URL still contains placeholder {TOKEN}" "ERROR"
+            Write-Log "You must replace {TOKEN} with your actual security token from the MSI filename" "ERROR"
+            throw "Download URL not configured correctly"
+        }
+
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+        try {
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec $downloadTimeoutSeconds
+            Write-Log "Download completed" "SUCCESS"
+        } catch {
+            throw "Download failed: $($_.Exception.Message)"
+        }
+    }
 
     # Verify download
     if (-not (Test-Path $installerPath)) {
-        throw "Installer file not found after download"
+        throw "Installer file not found: $installerPath"
     }
 
     $fileSize = (Get-Item $installerPath).Length
     $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
-    Write-Log "Downloaded: $fileSizeMB MB" "SUCCESS"
+    Write-Log "MSI File: $fileSizeMB MB" "SUCCESS"
+
+    # CRITICAL: Check filename format
+    $filename = [System.IO.Path]::GetFileName($installerPath)
+    Write-Log "MSI Filename: $filename" "INFO"
+
+    # Check filename format (allow both original and GitHub-modified formats)
+    if ($filename -notmatch "ATAcct\d+[._\(].*\.msi") {
+        Write-Log "=========================================" "ERROR"
+        Write-Log "ERROR: INCORRECT MSI FILENAME FORMAT!" "ERROR"
+        Write-Log "=========================================" "ERROR"
+        Write-Log "Current filename: $filename" "ERROR"
+        Write-Log "Required format: ATAcct######_{token}.msi or ATAcct######.{version}._{token}.msi" "ERROR"
+        Write-Log ""
+        Write-Log "The MSI filename MUST contain your account credentials." "ERROR"
+        Write-Log "Download the pre-configured MSI from ActivTrak portal." "ERROR"
+        Write-Log "=========================================" "ERROR"
+        throw "Invalid MSI filename format - installation will fail"
+    }
+
+    Write-Log "Filename format is correct!" "SUCCESS"
+    Write-Log ""
 
     # Calculate hash
     try {
@@ -198,106 +224,53 @@ try {
 
     Start-Sleep -Seconds 3
 
-    # INSTALLATION WITH ACCOUNT CONFIGURATION
-    Write-Log "========================================="
-    Write-Log "Starting installation with account configuration..."
-    Write-Log "========================================="
+    # INSTALLATION - SIMPLIFIED PER OFFICIAL DOCS
+    Write-Log ""
+    Write-Log "=========================================" "INFO"
+    Write-Log "Starting Silent Installation" "INFO"
+    Write-Log "=========================================" "INFO"
+    Write-Log "Using official ActivTrak silent install method" "INFO"
+    Write-Log "No account properties needed - embedded in MSI filename" "INFO"
+    Write-Log ""
 
-    $installSuccess = $false
-    $exitCode = 0
+    # Official ActivTrak silent installation command
+    # Per documentation: MSIEXEC /i ATAcctXXXXXX_{token}.msi -Quiet /l*v %TEMP%\atinstall.log
+    $installArgs = "/i `"$installerPath`" /qn /norestart /l*v `"$msiLogPath`""
+    Write-Log "Command: msiexec.exe $installArgs"
 
-    # Build installation command with account properties
-    # Try different property combinations that ActivTrak might use
-    $propertyVariations = @(
-        "ACCOUNT_ID=$ACCOUNT_ID AGENT_KEY=$AGENT_KEY",
-        "ACCOUNTID=$ACCOUNT_ID AGENTKEY=$AGENT_KEY",
-        "ACTIVTRAK_ACCOUNT=$ACCOUNT_ID ACTIVTRAK_KEY=$AGENT_KEY",
-        "AI_ACCOUNT_ID=$ACCOUNT_ID AI_AGENT_KEY=$AGENT_KEY"
-    )
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+    $exitCode = $process.ExitCode
+    Write-Log "Exit code: $exitCode"
 
-    foreach ($properties in $propertyVariations) {
-        Write-Log "Attempting installation with properties: $properties"
-
-        $installArgs = "/i `"$installerPath`" /qn /norestart $properties /l*v `"$msiLogPath`""
-        Write-Log "Command: msiexec.exe $installArgs"
-
-        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-        $exitCode = $process.ExitCode
-        Write-Log "Exit code: $exitCode"
-
-        if ($exitCode -eq 0 -or $exitCode -eq 3010) {
-            $installSuccess = $true
-            Write-Log "Installation successful with properties: $properties" "SUCCESS"
-            break
-        } else {
-            Write-Log "Failed with exit code $exitCode, trying next method..." "WARNING"
-            Start-Sleep -Seconds 2
-        }
-    }
-
-    # If all property variations failed, try without properties (embedded config)
-    if (-not $installSuccess) {
-        Write-Log "All property variations failed, trying with embedded configuration..." "WARNING"
-
-        $installArgs = "/i `"$installerPath`" /qn /norestart /l*v `"$msiLogPath`""
-        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-        $exitCode = $process.ExitCode
-        Write-Log "Exit code: $exitCode"
-
-        if ($exitCode -eq 0 -or $exitCode -eq 3010) {
-            $installSuccess = $true
-            Write-Log "Installation successful with embedded configuration!" "SUCCESS"
-        }
-    }
-
-    # Analyze the result
-    if (-not $installSuccess) {
+    if ($exitCode -eq 0) {
+        Write-Log "Installation completed successfully!" "SUCCESS"
+    } elseif ($exitCode -eq 3010) {
+        Write-Log "Installation completed successfully (reboot required)" "SUCCESS"
+    } else {
         Write-Log "=========================================" "ERROR"
         Write-Log "INSTALLATION FAILED - Exit Code: $exitCode" "ERROR"
         Write-Log "=========================================" "ERROR"
 
-        # Extract and show errors from MSI log
         if (Test-Path $msiLogPath) {
-            Write-Log "Analyzing MSI log for errors..." "ERROR"
+            Write-Log "Checking MSI log for errors..." "ERROR"
             $logContent = Get-Content $msiLogPath
-
-            # Look for the installAccountId custom action specifically
-            $accountIdErrors = $logContent | Select-String -Pattern "installAccountId|CustomAction.*returned" -Context 5,5
-
-            if ($accountIdErrors) {
-                Write-Log "Custom Action Errors:" "ERROR"
-                $accountIdErrors | Select-Object -First 3 | ForEach-Object {
-                    Write-Log $_.Line "ERROR"
-                }
+            $errors = $logContent | Select-String -Pattern "error|failed|return value 3" | Select-Object -First 10
+            if ($errors) {
+                Write-Log "Recent errors from MSI log:" "ERROR"
+                $errors | ForEach-Object { Write-Log $_.Line "ERROR" }
             }
-
-            # Look for property values to see what the MSI is expecting
-            $propertyLines = $logContent | Select-String -Pattern "Property.*ACCOUNT|Property.*AGENT|Property.*AI_" | Select-Object -First 10
-            if ($propertyLines) {
-                Write-Log "" "ERROR"
-                Write-Log "MSI Properties found:" "ERROR"
-                $propertyLines | ForEach-Object {
-                    Write-Log $_.Line "ERROR"
-                }
-            }
-
             Write-Log "" "ERROR"
             Write-Log "Full MSI log: $msiLogPath" "ERROR"
         }
-
-        Write-Log "" "ERROR"
-        Write-Log "TROUBLESHOOTING STEPS:" "ERROR"
-        Write-Log "1. Contact ActivTrak support to get a deployment MSI for account $ACCOUNT_ID" "ERROR"
-        Write-Log "2. Ask for the correct MSI properties needed for silent installation" "ERROR"
-        Write-Log "3. Check if your ActivTrak account requires agent approval/registration" "ERROR"
 
         throw "Installation failed with exit code $exitCode"
     }
 
     # Verify installation
-    Write-Log "========================================="
-    Write-Log "Verifying installation..."
-    Write-Log "========================================="
+    Write-Log ""
+    Write-Log "=========================================" "INFO"
+    Write-Log "Verifying installation..." "INFO"
+    Write-Log "=========================================" "INFO"
     Start-Sleep -Seconds 5
 
     $verifyApps = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
@@ -328,14 +301,17 @@ try {
     }
 
     # Cleanup
-    Write-Log "Cleaning up installer file..."
-    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    if ($installerPath -like "$env:TEMP\*") {
+        Write-Log "Cleaning up temporary installer file..."
+        Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    }
 
-    Write-Log "========================================="
+    Write-Log ""
+    Write-Log "=========================================" "SUCCESS"
     Write-Log "INSTALLATION COMPLETED SUCCESSFULLY" "SUCCESS"
-    Write-Log "========================================="
+    Write-Log "=========================================" "SUCCESS"
     Write-Log "Log file: $logPath"
-    Write-Log "========================================="
+    Write-Log "=========================================" "SUCCESS"
 
     exit 0
 
@@ -359,7 +335,9 @@ try {
     Write-Log "=========================================" "ERROR"
 
     # Cleanup
-    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    if ($installerPath -like "$env:TEMP\*") {
+        Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    }
 
     exit 1
 }
