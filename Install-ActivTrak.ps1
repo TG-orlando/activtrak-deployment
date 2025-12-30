@@ -16,7 +16,7 @@ $ErrorActionPreference = "Stop"
 # DO NOT rename the file or installation will fail!
 
 # Option 1: Download from GitHub release (recommended)
-$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v2.0.0/ATAcct680398.8.6.6.0._1szujUFkra0G_14519925690.msi"
+$downloadUrl = "https://github.com/TG-orlando/activtrak-deployment/releases/download/v2.0.0/ActivTrak-Account-680398.msi"
 
 # Option 2: Use local file if already downloaded
 # $localMsiPath = "C:\Temp\ATAcct680398(8.6.6.0)_1szujUFkra0G_14519925690.msi"
@@ -160,13 +160,18 @@ try {
     $filename = [System.IO.Path]::GetFileName($installerPath)
     Write-Log "MSI Filename: $filename" "INFO"
 
-    # Check filename format (allow both original and GitHub-modified formats)
-    if ($filename -notmatch "ATAcct\d+[._\(].*\.msi") {
+    # Check filename format (allow original ActivTrak format, GitHub consistent format, or temp download name)
+    # Valid patterns:
+    # - ATAcct######_{token}.msi (original from portal)
+    # - ATAcct######(version)_{token}.msi (original with version)
+    # - ActivTrak-Account-######.msi (GitHub consistent name)
+    # - ActivTrak_Deploy.msi (temporary download name - will be validated after extraction)
+    if ($filename -notmatch "(ATAcct\d+[._\(].*\.msi|ActivTrak-Account-\d+\.msi|ActivTrak_Deploy\.msi)") {
         Write-Log "=========================================" "ERROR"
         Write-Log "ERROR: INCORRECT MSI FILENAME FORMAT!" "ERROR"
         Write-Log "=========================================" "ERROR"
         Write-Log "Current filename: $filename" "ERROR"
-        Write-Log "Required format: ATAcct######_{token}.msi or ATAcct######.{version}._{token}.msi" "ERROR"
+        Write-Log "Required format: ATAcct######_{token}.msi, ATAcct######(version)_{token}.msi, or ActivTrak-Account-######.msi" "ERROR"
         Write-Log ""
         Write-Log "The MSI filename MUST contain your account credentials." "ERROR"
         Write-Log "Download the pre-configured MSI from ActivTrak portal." "ERROR"
