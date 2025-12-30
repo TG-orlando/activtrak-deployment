@@ -44,10 +44,10 @@ if (-not $isAdmin) {
 Write-Host "Running with Administrator privileges" -ForegroundColor Green
 
 # Configuration
-# CRITICAL: Use a filename that matches ActivTrak's expected format
-# Even though GitHub hosts it as "ActivTrak-Account-680398.msi", we need to save it
-# with a format that ActivTrak recognizes (ATAcct######_token.msi)
-$installerPath = "$env:TEMP\ATAcct680398_1szujUFkra0G.msi"
+# CRITICAL: Use the EXACT filename format from the original ActivTrak portal download
+# The filename must include: Account number, version in parentheses, agent key, and timestamp
+# Format: ATAcct######(version)_AgentKey_Timestamp.msi
+$installerPath = "$env:TEMP\ATAcct680398(8.6.6.0)_1szujUFkra0G_14519925690.msi"
 $logPath = "$env:TEMP\ActivTrak_Install.log"
 $msiLogPath = "$env:TEMP\ActivTrak_MSI_Install.log"
 $downloadTimeoutSeconds = 600
