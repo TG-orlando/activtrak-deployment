@@ -44,7 +44,10 @@ if (-not $isAdmin) {
 Write-Host "Running with Administrator privileges" -ForegroundColor Green
 
 # Configuration
-$installerPath = "$env:TEMP\ActivTrak_Deploy.msi"
+# CRITICAL: Use a filename that matches ActivTrak's expected format
+# Even though GitHub hosts it as "ActivTrak-Account-680398.msi", we need to save it
+# with a format that ActivTrak recognizes (ATAcct######_token.msi)
+$installerPath = "$env:TEMP\ATAcct680398_1szujUFkra0G.msi"
 $logPath = "$env:TEMP\ActivTrak_Install.log"
 $msiLogPath = "$env:TEMP\ActivTrak_MSI_Install.log"
 $downloadTimeoutSeconds = 600
@@ -160,21 +163,19 @@ try {
     $filename = [System.IO.Path]::GetFileName($installerPath)
     Write-Log "MSI Filename: $filename" "INFO"
 
-    # Check filename format (allow original ActivTrak format, GitHub consistent format, or temp download name)
+    # Check filename format - must match ActivTrak's expected format
     # Valid patterns:
-    # - ATAcct######_{token}.msi (original from portal)
-    # - ATAcct######(version)_{token}.msi (original with version)
-    # - ActivTrak-Account-######.msi (GitHub consistent name)
-    # - ActivTrak_Deploy.msi (temporary download name - will be validated after extraction)
-    if ($filename -notmatch "(ATAcct\d+[._\(].*\.msi|ActivTrak-Account-\d+\.msi|ActivTrak_Deploy\.msi)") {
+    # - ATAcct######_{token}.msi (required format with account credentials)
+    # - ATAcct######(version)_{token}_{timestamp}.msi (full original format)
+    if ($filename -notmatch "ATAcct\d+[._\(].*\.msi") {
         Write-Log "=========================================" "ERROR"
         Write-Log "ERROR: INCORRECT MSI FILENAME FORMAT!" "ERROR"
         Write-Log "=========================================" "ERROR"
         Write-Log "Current filename: $filename" "ERROR"
-        Write-Log "Required format: ATAcct######_{token}.msi, ATAcct######(version)_{token}.msi, or ActivTrak-Account-######.msi" "ERROR"
+        Write-Log "Required format: ATAcct######_{token}.msi or ATAcct######(version)_{token}_{timestamp}.msi" "ERROR"
         Write-Log ""
-        Write-Log "The MSI filename MUST contain your account credentials." "ERROR"
-        Write-Log "Download the pre-configured MSI from ActivTrak portal." "ERROR"
+        Write-Log "The MSI filename MUST match ActivTrak's format with embedded account credentials." "ERROR"
+        Write-Log "This script saves the downloaded MSI with the correct format automatically." "ERROR"
         Write-Log "=========================================" "ERROR"
         throw "Invalid MSI filename format - installation will fail"
     }
