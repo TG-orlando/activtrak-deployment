@@ -373,7 +373,105 @@ GITHUB_TOKEN="ghp_YourTokenHere"  # For MSI updates
 
 ---
 
-**Session Completed:** December 26, 2025, 12:30 PM EST
-**Status:** ✅ All objectives completed successfully
+## Follow-Up Session: December 30, 2025
+
+### Additional Issue Discovered
+
+After initial deployment, installation still failed with **Error 5001** despite using the correct download URL.
+
+### Root Cause Analysis
+
+The installation script was downloading from GitHub with the consistent filename (`ActivTrak-Account-680398.msi`) but saving it locally with incomplete filenames:
+
+**Attempt 1:** `ActivTrak_Deploy.msi` ❌
+- Generic temp filename
+- Missing account credentials entirely
+- Result: Error 5001
+
+**Attempt 2:** `ATAcct680398_1szujUFkra0G.msi` ❌
+- Included account and agent key
+- Missing version number and timestamp
+- Result: Error 5001
+
+**Root Cause:**
+ActivTrak's MSI installer validates the **exact filename format** to extract embedded credentials. The filename must include ALL components in the exact format from the portal:
+
+```
+ATAcct######(version)_AgentKey_Timestamp.msi
+```
+
+### Final Solution
+
+Updated `Install-ActivTrak.ps1` to save the downloaded MSI with the **complete original filename**:
+
+```powershell
+$installerPath = "$env:TEMP\ATAcct680398(8.6.6.0)_1szujUFkra0G_14519925690.msi"
+```
+
+**Filename Components:**
+- `ATAcct680398` - Account number
+- `(8.6.6.0)` - Version in parentheses (CRITICAL)
+- `_1szujUFkra0G` - Agent key
+- `_14519925690` - Timestamp (CRITICAL)
+
+### Result
+
+✅ **Installation successful with Exit code: 0**
+
+```
+=========================================
+Starting Silent Installation
+=========================================
+Command: msiexec.exe /i "C:\WINDOWS\TEMP\ATAcct680398(8.6.6.0)_1szujUFkra0G_14519925690.msi" /qn /norestart
+Exit code: 0
+Installation completed successfully!
+
+Installed: ActivTrak Agent 8.6.6.0 v8.6.6.0
+=========================================
+INSTALLATION COMPLETED SUCCESSFULLY
+=========================================
+```
+
+### Git Commits (Follow-Up Session)
+
+1. **Fix download URL to use consistent MSI filename**
+   - Commit: `6d8dcf1`
+   - Updated URL to point to `ActivTrak-Account-680398.msi`
+
+2. **Fix MSI filename to match ActivTrak required format**
+   - Commit: `f9a1d56`
+   - Changed temp filename to include account and agent key
+
+3. **Use exact original ActivTrak filename format with version and timestamp**
+   - Commit: `305c927`
+   - Added complete filename with version and timestamp
+   - **FINAL FIX** - Installation successful
+
+### Key Learnings (Follow-Up)
+
+1. **Filename format is more strict than initially understood** - All components (account, version, agent key, timestamp) are required
+2. **Version must be in parentheses** - Format: `(8.6.6.0)` not `.8.6.6.0.`
+3. **Timestamp is required** - Cannot be omitted even though it seems arbitrary
+4. **GitHub hosting with consistent name still works** - Download as `ActivTrak-Account-680398.msi` but save locally with proper format
+
+### Rippling MDM Deployment Command (Final)
+
+```powershell
+iex (iwr -Uri "https://raw.githubusercontent.com/TG-orlando/activtrak-deployment/main/Install-ActivTrak.ps1" -UseBasicParsing).Content
+```
+
+This command:
+- Downloads the latest script from GitHub
+- Script downloads MSI from GitHub release
+- Saves MSI with exact ActivTrak-required filename format
+- Installs silently without user interaction
+- Cleans up temporary files
+- Works seamlessly with Rippling MDM
+
+---
+
+**Original Session:** December 26, 2025, 12:30 PM EST
+**Follow-Up Session:** December 30, 2025, 4:00 PM EST
+**Status:** ✅ All objectives completed successfully - Deployment verified working
 **Generated with:** [Claude Code](https://claude.com/claude-code)
 **Model:** Claude Sonnet 4.5
